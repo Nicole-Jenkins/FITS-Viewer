@@ -83,8 +83,9 @@ fits_viewer/
 ## Contributing
 
 This is currently a solo project and not open to external code
-contributions. Bug reports and feature suggestions via GitHub Issues
-are welcome, but pull requests won't be merged - see LICENSE.
+contributions at this stage. Bug reports and feature suggestions via GitHub Issues
+are welcome, but pull requests won't be merged - see LICENSE. Contact me to request 
+to contribute.
 
 ## License
 

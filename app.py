@@ -1,7 +1,7 @@
 import sys
 from PySide6.QtWidgets import QApplication
 
-from fits_bridge.main_window import MainWindow
+from fits_viewer.main_window import MainWindow
 
 
 def main():

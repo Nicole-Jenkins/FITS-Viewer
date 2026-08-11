@@ -34,7 +34,7 @@ def _np_gray_to_pixmap(arr: np.ndarray) -> QPixmap:
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("FITS Bridge")
+        self.setWindowTitle("FITS Viewer")
         self.resize(1280, 800)
 
         self.thread_pool = QThreadPool.globalInstance()

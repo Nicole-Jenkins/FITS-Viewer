@@ -24,7 +24,7 @@ def _default_cache_dir() -> Path:
         base = Path(os.environ.get("LOCALAPPDATA", Path.home() / "AppData" / "Local"))
     else:
         base = Path.home() / ".cache"
-    cache_dir = base / "FitsBridge" / "thumbnails"
+    cache_dir = base / "FitsViewer" / "thumbnails"
     cache_dir.mkdir(parents=True, exist_ok=True)
     return cache_dir
 

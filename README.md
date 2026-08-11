@@ -1,12 +1,9 @@
-# FITS Bridge
+# FITS Viewer
 
 A lightweight desktop browser for FITS astronomy image files - built with
 PySide6 (Qt) and Astropy. Point it at a folder, get a thumbnail grid with
 auto-stretched previews and readable FITS headers, without opening a
 full processing suite just to see what's in a directory of exposures.
-
-> Working name. May be renamed (e.g. "FITS View") to avoid confusion with
-> Adobe Bridge.
 
 ## Features (current)
 
@@ -77,7 +74,7 @@ the desktop app, generalised to handle three distinct input cases:
   ported into this app.
 
 ### Other planned improvements
-- Rename the project away from "Bridge" branding
+- ~~Rename the project away from "Bridge" branding~~ done - now "FITS Viewer"
 - Possible EXR/TIFF export alongside PNG for further processing in
   PixInsight/Siril/etc.
 
@@ -85,7 +82,7 @@ the desktop app, generalised to handle three distinct input cases:
 
 ```
 app.py                    # Entry point - starts the Qt event loop
-fits_bridge/
+fits_viewer/
   fits_utils.py            # FITS reading, header merging, auto-stretch
   cache.py                 # Disk-backed thumbnail cache
   thumbnail_worker.py       # Background decode worker (QRunnable)

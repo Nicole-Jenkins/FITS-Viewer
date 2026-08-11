@@ -19,7 +19,9 @@ Thumbs.db
 # pointed inside the project folder during testing)
 FitsViewer/
 
-# Local test data - large FITS files shouldn't go into git
+# PyInstaller build output (regenerate with FitsViewer.spec, don't commit)
+build/
+dist/
 Test FITS files/
 *.fits
 *.fit

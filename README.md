@@ -26,20 +26,11 @@ full processing suite just to see what's in a directory of exposures.
 - Handles NaN-filled regions correctly (e.g. drizzled HST products with
   rotated footprints) instead of rendering solid black/corrupted frames
 
-## Requirements
+## Download and run (Windows)
 
-- Python 3.10+
-- See `requirements.txt`
-
-## Setup
-
-```
-python -m venv venv
-venv\Scripts\activate        # Windows
-source venv/bin/activate     # macOS/Linux
-pip install -r requirements.txt
-python app.py
-```
+1. Go to the [Releases](../../releases) page.
+2. Download the latest `FITS Viewer.exe`.
+3. Double-click it. No Python, no install, nothing else needed.
 
 ## Known limitations
 
@@ -74,7 +65,6 @@ the desktop app, generalised to handle three distinct input cases:
   ported into this app.
 
 ### Other planned improvements
-- ~~Rename the project away from "Bridge" branding~~ done - now "FITS Viewer"
 - Possible EXR/TIFF export alongside PNG for further processing in
   PixInsight/Siril/etc.
 
@@ -89,10 +79,6 @@ fits_viewer/
   main_window.py            # Main GUI - tree, grid, header panel
   image_viewer.py           # Full-size zoom/pan popup (Space key)
 ```
-
-See `HOW_IT_WORKS.md` for a detailed walkthrough of why the app is
-split this way and the reasoning behind the trickier parts (the
-auto-stretch algorithm, NaN handling, cache invalidation).
 
 ## Contributing
 

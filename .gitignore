@@ -1,0 +1,26 @@
+# Virtual environment
+venv/
+.venv/
+
+# Python bytecode
+__pycache__/
+*.pyc
+
+# Editor / OS junk
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# App's own on-disk thumbnail cache (regenerates automatically, not source)
+# Windows: %LOCALAPPDATA%\FitsBridge\thumbnails
+# Linux/Mac: ~/.cache/FitsBridge/thumbnails
+# (lives outside the repo, listed here only in case cache_dir is ever
+# pointed inside the project folder during testing)
+FitsBridge/
+
+# Local test data - large FITS files shouldn't go into git
+Test FITS files/
+*.fits
+*.fit
+*.fts

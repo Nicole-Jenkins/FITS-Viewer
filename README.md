@@ -65,8 +65,8 @@ the desktop app, generalised to handle three distinct input cases:
   ported into this app.
 
 ### Other planned improvements
-- Possible EXR/TIFF export alongside PNG for further processing in
-  PixInsight/Siril/etc.
+- Export stretched preview as PNG, JPG, or TIFF for further processing in
+  Photoshop/Lightroom/etc.
 
 ## Project structure
 

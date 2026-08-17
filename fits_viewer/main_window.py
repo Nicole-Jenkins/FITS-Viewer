@@ -87,6 +87,11 @@ class MainWindow(QMainWindow):
         open_action.triggered.connect(self._choose_root_folder)
         toolbar.addAction(open_action)
 
+        self.add_favorite_action = QAction("Add to Favourites", self)
+        self.add_favorite_action.triggered.connect(self._add_current_folder_favorite)
+        self.add_favorite_action.setEnabled(False)  # enabled once a folder is open
+        toolbar.addAction(self.add_favorite_action)
+
         self.export_action = QAction("Export Image...", self)
         self.export_action.triggered.connect(self._export_selected_image)
         self.export_action.setEnabled(False)  # enabled once a file is selected
@@ -187,10 +192,18 @@ class MainWindow(QMainWindow):
     def _choose_root_folder(self):
         folder = QFileDialog.getExistingDirectory(self, "Choose astro library folder")
         if folder:
-            idx = self.fs_model.index(folder)
-            self.tree.setRootIndex(idx)
-            self.tree.expand(idx)
+            self._navigate_tree_to(folder)
             self._load_folder(folder)
+
+    def _navigate_tree_to(self, path: str):
+        """Select and reveal a folder in the tree without hiding its
+        parents/drives above it - setRootIndex() was used here previously,
+        which scoped the tree down to only that folder's subfolders and
+        made the tree look empty for any folder with no subdirectories."""
+        idx = self.fs_model.index(path)
+        self.tree.setCurrentIndex(idx)
+        self.tree.scrollTo(idx)
+        self.tree.expand(idx)
 
     def _on_tree_selected(self, index):
         path = self.fs_model.filePath(index)
@@ -226,6 +239,12 @@ class MainWindow(QMainWindow):
         remove_action.triggered.connect(lambda: self._remove_favorite(path))
         menu.exec(self.favorites_list.viewport().mapToGlobal(pos))
 
+    def _add_current_folder_favorite(self):
+        if self._current_dir is None:
+            return
+        self._add_favorite(self._current_dir)
+        self.statusBar().showMessage(f"Added to favourites: {self._current_dir}")
+
     def _add_favorite(self, path: str):
         if path in self._favorites:
             return
@@ -257,14 +276,12 @@ class MainWindow(QMainWindow):
         if not os.path.isdir(path):
             self.statusBar().showMessage(f"Folder no longer exists: {path}")
             return
-        idx = self.fs_model.index(path)
-        self.tree.setCurrentIndex(idx)
-        self.tree.scrollTo(idx)
-        self.tree.expand(idx)
+        self._navigate_tree_to(path)
         self._load_folder(path)
 
     def _load_folder(self, folder: str):
         self._current_dir = folder
+        self.add_favorite_action.setEnabled(True)
         self.grid.clear()
         self._info_by_path.clear()
         self.statusBar().showMessage(f"Scanning {folder}...")

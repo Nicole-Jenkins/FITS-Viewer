@@ -8,6 +8,9 @@ full processing suite just to see what's in a directory of exposures.
 ## Features (current)
 
 - Folder tree browser, filtered to FITS files (`.fits`, `.fit`, `.fts`)
+- Favourites panel - right-click any folder in the tree to pin it for
+  quick access, right-click a favourite to remove it (persists between
+  sessions)
 - Auto-stretched thumbnail grid (median/MAD-based stretch, the same
   family of algorithm PixInsight and Siril use for their screen-stretch
   preview - handles real astro data properly instead of a naive min/max)
@@ -23,14 +26,25 @@ full processing suite just to see what's in a directory of exposures.
 - Adjustable thumbnail size (slider)
 - Full-size zoomable/pannable preview (select a file, press Space;
   scroll to zoom, drag to pan, Space/Esc to close)
+- Export the auto-stretched image as PNG, JPEG, or TIFF ("Export
+  Image..." toolbar button) - decoded at full native resolution, not
+  the thumbnail preview size
 - Handles NaN-filled regions correctly (e.g. drizzled HST products with
   rotated footprints) instead of rendering solid black/corrupted frames
 
-## Download and run (Windows)
+## Download and run
 
 1. Go to the [Releases](../../releases) page.
-2. Download the latest `FITS Viewer.exe`.
-3. Double-click it. No Python, no install, nothing else needed.
+2. Download the file for your system: `FITS-Viewer-Windows.exe`,
+   `FITS-Viewer-macOS`, or `FITS-Viewer-Linux`.
+3. **Windows**: double-click it. No Python, no install, nothing else
+   needed.
+4. **Mac**: the first time you open it, macOS will warn about an
+   "unidentified developer" - this is normal for free/unsigned
+   software. Right-click the file -> **Open** -> **Open** to confirm,
+   and it'll launch normally every time after that.
+5. **Linux**: mark it executable first (`chmod +x FITS-Viewer-Linux`),
+   then run it.
 
 ## Known limitations
 
@@ -64,10 +78,6 @@ the desktop app, generalised to handle three distinct input cases:
   their rest wavelengths. Will be based on existing extraction logic,
   ported into this app.
 
-### Other planned improvements
-- Possible EXR/TIFF export alongside PNG for further processing in
-  PixInsight/Siril/etc.
-
 ## Project structure
 
 ```
@@ -91,4 +101,3 @@ to contribute.
 
 Custom license - see `LICENSE`. Free to download and run for personal
 use. Modification and redistribution are not permitted.
-

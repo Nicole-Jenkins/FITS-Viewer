@@ -1,0 +1,70 @@
+name: Build Executables
+
+# Two ways to trigger this:
+# 1. Automatically, whenever you publish a GitHub Release - the built
+#    files get attached to that release automatically.
+# 2. Manually, from the Actions tab ("Run workflow" button) - useful
+#    for testing a build without publishing a release yet. Files show
+#    up as downloadable "artifacts" on that run instead.
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+permissions:
+  contents: write  # needed to attach files to a release
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false  # if one OS's build fails, still let the others finish
+      matrix:
+        include:
+          - os: windows-latest
+            asset_name: FITS-Viewer-Windows.exe
+            build_path: dist/FITS Viewer.exe
+          - os: macos-latest
+            asset_name: FITS-Viewer-macOS
+            build_path: dist/FITS Viewer
+          - os: ubuntu-latest
+            asset_name: FITS-Viewer-Linux
+            build_path: dist/FITS Viewer
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          pip install -r requirements.txt
+          pip install pyinstaller
+
+      - name: Build with PyInstaller
+        run: pyinstaller FitsViewer.spec
+
+      - name: Prepare release-named copy
+        shell: bash
+        run: |
+          mkdir -p release_output
+          cp "${{ matrix.build_path }}" "release_output/${{ matrix.asset_name }}"
+
+      # Always available as a downloadable artifact on the workflow run,
+      # even for manual test runs with no release attached.
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.asset_name }}
+          path: release_output/${{ matrix.asset_name }}
+
+      # Only runs when triggered by actually publishing a release.
+      - name: Attach to release
+        if: github.event_name == 'release'
+        uses: softprops/action-gh-release@v2
+        with:
+          files: release_output/${{ matrix.asset_name }}

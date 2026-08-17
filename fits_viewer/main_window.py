@@ -2,15 +2,16 @@ from __future__ import annotations
 
 import os
 
-from PySide6.QtCore import Qt, QSize, QThreadPool, QDir, QEvent
-from PySide6.QtGui import QImage, QPixmap, QIcon
+from PySide6.QtCore import Qt, QSize, QThreadPool, QDir, QEvent, QSettings
+from PySide6.QtGui import QImage, QPixmap, QIcon, QAction
 from PySide6.QtWidgets import (
     QMainWindow, QWidget, QSplitter, QTreeView, QListWidget, QListWidgetItem,
     QFileSystemModel, QVBoxLayout, QHBoxLayout, QLabel, QTableWidget,
     QTableWidgetItem, QHeaderView, QStatusBar, QFileDialog, QToolBar, QSlider,
+    QMessageBox, QMenu,
 )
-from PySide6.QtGui import QAction
 import numpy as np
+from PIL import Image
 
 from .fits_utils import HEADER_FIELDS, FitsImageInfo
 from .thumbnail_worker import ThumbnailWorker
@@ -21,6 +22,7 @@ THUMB_SIZE = 220
 MIN_THUMB_SIZE = 80
 MAX_THUMB_SIZE = 400
 ENLARGE_SIZE = 1600  # long-edge px for the spacebar full-size view
+EXPORT_SIZE = 0  # 0 = full native resolution, no downsampling (Save Image As...)
 
 
 def _np_gray_to_pixmap(arr: np.ndarray) -> QPixmap:
@@ -46,31 +48,85 @@ class MainWindow(QMainWindow):
         self._enlarge_dialog: EnlargeDialog | None = None
         self._enlarge_path: str | None = None
 
+        self._export_path: str | None = None
+
+        self.settings = QSettings("NicoleJenkins", "FITSViewer")
+        self._favorites: list[str] = self.settings.value("favorites", [], type=list)
+
         self._build_toolbar()
         self._build_layout()
 
     # ---------------------------------------------------------------- UI setup
     def _build_toolbar(self):
         toolbar = QToolBar("Main")
+        toolbar.setMovable(False)
+        toolbar.setStyleSheet("""
+            QToolBar {
+                padding: 8px;
+                spacing: 12px;
+            }
+            QToolButton {
+                font-size: 14px;
+                padding: 8px 14px;
+            }
+            QLabel {
+                font-size: 14px;
+            }
+            QSlider::groove:horizontal {
+                height: 6px;
+            }
+            QSlider::handle:horizontal {
+                width: 20px;
+                height: 20px;
+                margin: -7px 0;
+                border-radius: 10px;
+            }
+        """)
         self.addToolBar(toolbar)
         open_action = QAction("Open Folder...", self)
         open_action.triggered.connect(self._choose_root_folder)
         toolbar.addAction(open_action)
 
+        self.export_action = QAction("Export Image...", self)
+        self.export_action.triggered.connect(self._export_selected_image)
+        self.export_action.setEnabled(False)  # enabled once a file is selected
+        toolbar.addAction(self.export_action)
+
         toolbar.addSeparator()
-        toolbar.addWidget(QLabel("Thumbnail size:  "))
+        toolbar.addWidget(QLabel("  Thumbnail size:  "))
         self.thumb_size_slider = QSlider(Qt.Horizontal)
         self.thumb_size_slider.setMinimum(MIN_THUMB_SIZE)
         self.thumb_size_slider.setMaximum(MAX_THUMB_SIZE)
         self.thumb_size_slider.setValue(THUMB_SIZE)
-        self.thumb_size_slider.setFixedWidth(140)
+        self.thumb_size_slider.setFixedWidth(180)
         self.thumb_size_slider.valueChanged.connect(self._on_thumb_size_changed)
         toolbar.addWidget(self.thumb_size_slider)
 
     def _build_layout(self):
         splitter = QSplitter(Qt.Horizontal)
 
-        # --- Folder tree (left) ---
+        # --- Favourites + folder tree (left) ---
+        left = QWidget()
+        left_layout = QVBoxLayout(left)
+        left_layout.setContentsMargins(0, 0, 0, 0)
+        left_layout.setSpacing(4)
+
+        favorites_label = QLabel("FAVOURITES")
+        favorites_label.setStyleSheet("font-weight: 600; color: #888; padding: 4px 6px;")
+        left_layout.addWidget(favorites_label)
+
+        self.favorites_list = QListWidget()
+        self.favorites_list.setMaximumHeight(140)
+        self.favorites_list.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.favorites_list.customContextMenuRequested.connect(self._show_favorites_context_menu)
+        self.favorites_list.itemClicked.connect(self._on_favorite_clicked)
+        left_layout.addWidget(self.favorites_list)
+        self._refresh_favorites_list()
+
+        folders_label = QLabel("FOLDERS")
+        folders_label.setStyleSheet("font-weight: 600; color: #888; padding: 4px 6px;")
+        left_layout.addWidget(folders_label)
+
         self.fs_model = QFileSystemModel()
         self.fs_model.setRootPath("")
         self.fs_model.setFilter(QDir.AllDirs | QDir.NoDotAndDotDot)
@@ -82,7 +138,11 @@ class MainWindow(QMainWindow):
         self.tree.setColumnHidden(3, True)
         self.tree.setHeaderHidden(True)
         self.tree.clicked.connect(self._on_tree_selected)
-        splitter.addWidget(self.tree)
+        self.tree.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.tree.customContextMenuRequested.connect(self._show_tree_context_menu)
+        left_layout.addWidget(self.tree)
+
+        splitter.addWidget(left)
 
         # --- Thumbnail grid (middle) ---
         self.grid = QListWidget()
@@ -136,6 +196,72 @@ class MainWindow(QMainWindow):
         path = self.fs_model.filePath(index)
         if os.path.isdir(path):
             self._load_folder(path)
+
+    # ---------------------------------------------------------------- favourites
+    def _show_tree_context_menu(self, pos):
+        index = self.tree.indexAt(pos)
+        if not index.isValid():
+            return
+        path = self.fs_model.filePath(index)
+        if not os.path.isdir(path):
+            return
+
+        menu = QMenu(self)
+        if path in self._favorites:
+            action = menu.addAction("Already in Favourites")
+            action.setEnabled(False)
+        else:
+            action = menu.addAction("Add to Favourites")
+            action.triggered.connect(lambda: self._add_favorite(path))
+        menu.exec(self.tree.viewport().mapToGlobal(pos))
+
+    def _show_favorites_context_menu(self, pos):
+        item = self.favorites_list.itemAt(pos)
+        if item is None:
+            return
+        path = item.data(Qt.UserRole)
+
+        menu = QMenu(self)
+        remove_action = menu.addAction("Remove from Favourites")
+        remove_action.triggered.connect(lambda: self._remove_favorite(path))
+        menu.exec(self.favorites_list.viewport().mapToGlobal(pos))
+
+    def _add_favorite(self, path: str):
+        if path in self._favorites:
+            return
+        self._favorites.append(path)
+        self._save_favorites()
+        self._refresh_favorites_list()
+
+    def _remove_favorite(self, path: str):
+        if path not in self._favorites:
+            return
+        self._favorites.remove(path)
+        self._save_favorites()
+        self._refresh_favorites_list()
+
+    def _save_favorites(self):
+        self.settings.setValue("favorites", self._favorites)
+
+    def _refresh_favorites_list(self):
+        self.favorites_list.clear()
+        for path in self._favorites:
+            name = os.path.basename(path.rstrip("/\\")) or path
+            item = QListWidgetItem(name)
+            item.setData(Qt.UserRole, path)
+            item.setToolTip(path)
+            self.favorites_list.addItem(item)
+
+    def _on_favorite_clicked(self, item: QListWidgetItem):
+        path = item.data(Qt.UserRole)
+        if not os.path.isdir(path):
+            self.statusBar().showMessage(f"Folder no longer exists: {path}")
+            return
+        idx = self.fs_model.index(path)
+        self.tree.setCurrentIndex(idx)
+        self.tree.scrollTo(idx)
+        self.tree.expand(idx)
+        self._load_folder(path)
 
     def _load_folder(self, folder: str):
         self._current_dir = folder
@@ -268,15 +394,63 @@ class MainWindow(QMainWindow):
             return
         self._enlarge_dialog.set_pixmap(_np_gray_to_pixmap(thumb))
 
+    # ---------------------------------------------------------------- export
+    def _export_selected_image(self):
+        item = self.grid.currentItem()
+        if item is None:
+            return
+        path = item.data(Qt.UserRole)
+
+        self._export_path = path
+        self.statusBar().showMessage(f"Decoding {os.path.basename(path)} at full resolution...")
+
+        worker = ThumbnailWorker(path, thumb_size=EXPORT_SIZE)
+        worker.signals.finished.connect(self._on_export_ready)
+        self.thread_pool.start(worker)
+
+    def _on_export_ready(self, path: str, thumb, info: FitsImageInfo):
+        # User may have selected a different file while this was decoding.
+        if path != self._export_path:
+            return
+        self._export_path = None
+
+        if thumb is None:
+            self.statusBar().showMessage("Export failed")
+            QMessageBox.warning(
+                self, "Export failed",
+                f"Could not decode {os.path.basename(path)}: {info.error or 'unknown error'}",
+            )
+            return
+
+        default_name = os.path.splitext(os.path.basename(path))[0] + ".png"
+        save_path, _filter = QFileDialog.getSaveFileName(
+            self, "Export Image", default_name,
+            "PNG Image (*.png);;JPEG Image (*.jpg);;TIFF Image (*.tiff)",
+        )
+        if not save_path:
+            self.statusBar().showMessage("Export cancelled")
+            return
+
+        try:
+            Image.fromarray(thumb, mode="L").save(save_path)
+        except Exception as exc:  # noqa: BLE001 - surfaced to the user, not a crash
+            QMessageBox.warning(self, "Export failed", f"Could not save file: {exc}")
+            self.statusBar().showMessage("Export failed")
+            return
+
+        self.statusBar().showMessage(f"Saved {save_path}")
+
     def _on_thumbnail_selected(self, current: QListWidgetItem, _previous):
         if current is None:
             self.filename_label.setText("No file selected")
             for row in range(self.header_table.rowCount()):
                 self.header_table.setItem(row, 1, QTableWidgetItem(""))
+            self.export_action.setEnabled(False)
             return
 
         path = current.data(Qt.UserRole)
         self.filename_label.setText(os.path.basename(path))
+        self.export_action.setEnabled(True)
         info = self._info_by_path.get(path)
         if info is None:
             return

@@ -203,6 +203,10 @@ def make_thumbnail_array(path: str, max_size: int = 256) -> np.ndarray:
     Decode a FITS file and return an (H, W) uint8 array, auto-stretched and
     downsampled to fit within max_size on the longest edge.
 
+    max_size=0 means "no downsampling" - full native resolution. Used for
+    export (Save Image As...), where the person wants the actual full-res
+    stretched image rather than a fast preview.
+
     Downsampling happens via strided slicing on the raw array *before* the
     percentile computation touches every pixel where possible, to keep this
     cheap across a few hundred files.
@@ -227,10 +231,11 @@ def make_thumbnail_array(path: str, max_size: int = 256) -> np.ndarray:
         data = data[0]
 
     h, w = data.shape
-    scale = max(h, w) / max_size
-    if scale > 1:
-        step = int(np.ceil(scale))
-        data = data[::step, ::step]
+    if max_size > 0:
+        scale = max(h, w) / max_size
+        if scale > 1:
+            step = int(np.ceil(scale))
+            data = data[::step, ::step]
 
     stretched = _percentile_stretch(data)
     return (stretched * 255.0).astype(np.uint8)

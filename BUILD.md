@@ -3,9 +3,26 @@
 Not linked from README on purpose - this is for you, not for people
 downloading the app.
 
-Run whenever the code changes and you need a new release build.
+## Automated builds (Windows + Mac + Linux, via GitHub Actions)
 
-## Steps
+`.github/workflows/build.yml` builds all three platforms automatically
+in the cloud (GitHub's own servers, not your machine) whenever you
+publish a GitHub Release. The built files get attached to that release
+automatically - no manual `dist\` copying needed for any platform.
+
+You can also trigger a test build without publishing a release: go to
+your repo's **Actions** tab -> **Build Executables** -> **Run workflow**.
+The results appear as downloadable "artifacts" on that run.
+
+Known limitation: the Mac build is a raw unsigned binary, not a proper
+`.app` bundle with an icon. It'll run, but macOS Gatekeeper shows an
+"unidentified developer" warning on first launch per download - normal
+for free/unsigned software, works around itself with one right-click ->
+Open. Avoiding this warning entirely requires Apple's paid developer
+program ($99/year) for code signing, which isn't set up here.
+
+## Manual build (what the Actions workflow above also does, if you
+## ever need to do it yourself on your own Windows machine)
 
 1. Open cmd in the project folder.
 2. Activate the venv and make sure pyinstaller is installed:

@@ -1,5 +1,9 @@
 # FITS Viewer
 
+[![Windows](https://img.shields.io/badge/Windows-0078D6?style=flat&logo=windows&logoColor=white)](../../releases)
+[![macOS](https://img.shields.io/badge/macOS-000000?style=flat&logo=apple&logoColor=white)](../../releases)
+[![Linux](https://img.shields.io/badge/Linux-FCC624?style=flat&logo=linux&logoColor=black)](../../releases)
+
 A lightweight desktop browser for FITS astronomy image files - built with
 PySide6 (Qt) and Astropy. Point it at a folder, get a thumbnail grid with
 auto-stretched previews and readable FITS headers, without opening a
@@ -36,15 +40,44 @@ full processing suite just to see what's in a directory of exposures.
 
 1. Go to the [Releases](../../releases) page.
 2. Download the file for your system: `FITS-Viewer-Windows.exe`,
-   `FITS-Viewer-macOS`, or `FITS-Viewer-Linux`.
+   `FITS-Viewer-macOS.zip`, or `FITS-Viewer-Linux.AppImage`.
 3. **Windows**: double-click it. No Python, no install, nothing else
    needed.
-4. **Mac**: the first time you open it, macOS will warn about an
-   "unidentified developer" - this is normal for free/unsigned
-   software. Right-click the file -> **Open** -> **Open** to confirm,
-   and it'll launch normally every time after that.
-5. **Linux**: mark it executable first (`chmod +x FITS-Viewer-Linux`),
-   then run it.
+4. **Mac**: unzip the download, then right-click `FITS Viewer.app` ->
+   **Open** -> **Open** (needed once, since this isn't a signed app -
+   after that it opens normally by double-clicking).
+5. **Linux**: right-click the `.AppImage` file -> Properties ->
+   Permissions -> allow executing as a program, then double-click it.
+   (Or from a terminal: `chmod +x FITS-Viewer-Linux.AppImage` then
+   `./FITS-Viewer-Linux.AppImage`.)
+
+## Troubleshooting
+
+If Mac or Linux still won't open using the steps above (e.g. an older
+system, unusual security settings, or a file manager that doesn't
+support the "allow execute" toggle), these terminal commands are a
+reliable fallback - thanks to **Dr Michael Cowley** for finding and
+sharing these. (Written against the older raw-binary builds - if
+you're on the current `.app`/`.AppImage` release, the file names below
+won't match exactly, but `chmod +x` and, on Mac, `xattr -d
+com.apple.quarantine` on whatever file you actually downloaded is the
+same underlying fix.)
+
+**Mac:**
+```
+chmod +x FITS-Viewer-macOS
+xattr -d com.apple.quarantine FITS-Viewer-macOS
+./FITS-Viewer-macOS
+```
+(First line adds execute permission, second removes the Gatekeeper
+quarantine flag, third runs it. Same idea as running other unsigned
+scientific tools like SAOImageDS9 or TOPCAT.)
+
+**Linux:**
+```
+chmod +x FITS-Viewer-Linux
+./FITS-Viewer-Linux
+```
 
 ## Known limitations
 
@@ -77,6 +110,14 @@ the desktop app, generalised to handle three distinct input cases:
   since the target's actual emission lines are redshifted away from
   their rest wavelengths. Will be based on existing extraction logic,
   ported into this app.
+
+### Other planned improvements
+- Custom app icon (currently the default PyInstaller icon)
+- Heatmap/colormap display mode for derived data products (e.g. SAMI
+  SFR/velocity/dispersion maps) rather than the grayscale auto-stretch
+  used for raw exposures - needs a real sample file to design properly
+  (scaling and colormap choice differ a lot between e.g. a flux map and
+  a velocity map)
 
 ## Project structure
 

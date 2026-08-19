@@ -53,3 +53,25 @@ exe = EXE(
     codesign_identity=None,
     entitlements_file=None,
 )
+
+# On Mac specifically, wrap the raw binary in a proper .app bundle.
+# Without this, Finder treats the output as a bare Unix executable
+# rather than a real application - the standard Gatekeeper "right-click
+# -> Open" workaround doesn't apply cleanly to that, which is why Mac
+# users previously had to go through Terminal with xattr manually.
+# A real .app bundle restores the normal right-click flow.
+# This step is a no-op on Windows/Linux - only runs when PyInstaller
+# itself is running on macOS, which the build workflow already ensures
+# per-platform.
+import sys
+
+if sys.platform == "darwin":
+    app = BUNDLE(
+        exe,
+        name="FITS Viewer.app",
+        icon=None,  # TODO: set once a custom app icon exists (see roadmap)
+        bundle_identifier="com.nicolejenkins.fitsviewer",
+        info_plist={
+            "NSHighResolutionCapable": "True",
+        },
+    )

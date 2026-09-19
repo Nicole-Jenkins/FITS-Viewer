@@ -13,8 +13,8 @@ import numpy as np
 from astropy.io import fits
 
 
-# Header keywords we care about, and friendly labels for the UI.
-# Extend this list once we see real-world header dumps from the user's files.
+# Header keywords displayed in the UI, with display labels.
+# Extend as additional instruments/pipelines require new fields.
 HEADER_FIELDS: list[tuple[str, str]] = [
     ("OBJECT", "Object"),
     ("FILTER", "Filter"),
@@ -27,6 +27,7 @@ HEADER_FIELDS: list[tuple[str, str]] = [
     ("XPIXSZ", "Pixel size (um)"),
     ("RA", "RA"),
     ("DEC", "Dec"),
+    ("FOV", "Field of view"),
     ("NAXIS1", "Width (px)"),
     ("NAXIS2", "Height (px)"),
 ]
@@ -84,6 +85,47 @@ def _merged_header(hdul: fits.HDUList, hdu) -> dict:
     return merged
 
 
+def _format_angle(deg: float) -> str:
+    """Format a sky angle as arcminutes if >= 1', otherwise arcseconds."""
+    arcmin = deg * 60.0
+    if arcmin >= 1.0:
+        return f"{arcmin:.1f}'"
+    arcsec = deg * 3600.0
+    return f'{arcsec:.1f}"'
+
+
+def _compute_fov(hdr: dict) -> str | None:
+    """Field of view computed from WCS pixel scale x image dimensions.
+
+    Returns None if no usable WCS is present in the header; the field
+    is omitted rather than raised as an error.
+    """
+    try:
+        naxis1 = hdr.get("NAXIS1")
+        naxis2 = hdr.get("NAXIS2")
+        if not naxis1 or not naxis2:
+            return None
+
+        from astropy.wcs import WCS
+        from astropy.wcs.utils import proj_plane_pixel_scales
+        import warnings
+
+        with warnings.catch_warnings():
+            # relax=True already handles non-standard WCS headers correctly;
+            # suppress the associated validation warnings.
+            warnings.simplefilter("ignore")
+            wcs = WCS(hdr, relax=True)
+            if not wcs.has_celestial:
+                return None
+            scales_deg = proj_plane_pixel_scales(wcs.celestial)
+
+        fov_x_deg = abs(scales_deg[0]) * float(naxis1)
+        fov_y_deg = abs(scales_deg[1]) * float(naxis2)
+        return f"{_format_angle(fov_x_deg)} x {_format_angle(fov_y_deg)}"
+    except Exception:  # noqa: BLE001 - non-critical field, never raised
+        return None
+
+
 def _is_memmap_scaling_error(exc: Exception) -> bool:
     msg = str(exc).lower()
     return "memmap" in msg or "bzero" in msg or "bscale" in msg
@@ -99,10 +141,9 @@ def read_fits_info(path: str) -> FitsImageInfo:
                     return FitsImageInfo(path=path, error="No image data found")
                 hdr = _merged_header(hdul, hdu)
         except ValueError as exc:
-            # BZERO/BSCALE/BLANK together — astropy only raises this once the
-            # data is actually touched, which _find_image_hdu does while
-            # checking ndim, so we land here even though we only wanted the
-            # header. Retry fully unmapped.
+            # BZERO/BSCALE/BLANK combinations raise a ValueError on first
+            # data access rather than at open time; _find_image_hdu triggers
+            # this while checking ndim. Retry without memmap.
             if not _is_memmap_scaling_error(exc):
                 raise
             with fits.open(path, memmap=False, ignore_missing_end=True) as hdul:
@@ -113,8 +154,15 @@ def read_fits_info(path: str) -> FitsImageInfo:
 
         values = {}
         for key, _label in HEADER_FIELDS:
+            if key == "FOV":
+                continue  # not a literal header keyword - computed below
             if key in hdr:
                 values[key] = hdr[key]
+
+        fov = _compute_fov(hdr)
+        if fov is not None:
+            values["FOV"] = fov
+
         return FitsImageInfo(path=path, header=values)
     except Exception as exc:  # noqa: BLE001 - surfaced to the UI, not swallowed
         return FitsImageInfo(path=path, error=str(exc))
@@ -203,9 +251,8 @@ def make_thumbnail_array(path: str, max_size: int = 256) -> np.ndarray:
     Decode a FITS file and return an (H, W) uint8 array, auto-stretched and
     downsampled to fit within max_size on the longest edge.
 
-    max_size=0 means "no downsampling" - full native resolution. Used for
-    export (Save Image As...), where the person wants the actual full-res
-    stretched image rather than a fast preview.
+    max_size=0 disables downsampling (full native resolution), used for
+    full-resolution image export.
 
     Downsampling happens via strided slicing on the raw array *before* the
     percentile computation touches every pixel where possible, to keep this

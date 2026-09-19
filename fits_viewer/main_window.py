@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import os
 
-from PySide6.QtCore import Qt, QSize, QThreadPool, QDir, QEvent, QSettings
-from PySide6.QtGui import QImage, QPixmap, QIcon, QAction
+from PySide6.QtCore import Qt, QSize, QThreadPool, QDir, QEvent, QSettings, QUrl
+from PySide6.QtGui import QImage, QPixmap, QIcon, QAction, QDesktopServices
 from PySide6.QtWidgets import (
     QMainWindow, QWidget, QSplitter, QTreeView, QListWidget, QListWidgetItem,
     QFileSystemModel, QVBoxLayout, QHBoxLayout, QLabel, QTableWidget,
@@ -16,6 +16,8 @@ from PIL import Image
 from .fits_utils import HEADER_FIELDS, FitsImageInfo
 from .thumbnail_worker import ThumbnailWorker
 from .image_viewer import EnlargeDialog
+from .update_checker import UpdateCheckWorker
+from .version import APP_VERSION
 
 FITS_EXTENSIONS = {".fits", ".fit", ".fts"}
 THUMB_SIZE = 220
@@ -23,6 +25,17 @@ MIN_THUMB_SIZE = 80
 MAX_THUMB_SIZE = 400
 ENLARGE_SIZE = 1600  # long-edge px for the spacebar full-size view
 EXPORT_SIZE = 0  # 0 = full native resolution, no downsampling (Save Image As...)
+
+
+def _is_fits_file(name: str) -> bool:
+    """True for .fits/.fit/.fts files, including gzip-compressed variants
+    (.fits.gz etc). astropy reads gzip-compressed FITS transparently;
+    this only handles recognition during folder listing, since a plain
+    extension check sees only the trailing ".gz"."""
+    lower = name.lower()
+    if lower.endswith(".gz"):
+        lower = lower[:-3]
+    return os.path.splitext(lower)[1] in FITS_EXTENSIONS
 
 
 def _np_gray_to_pixmap(arr: np.ndarray) -> QPixmap:
@@ -40,7 +53,7 @@ class MainWindow(QMainWindow):
         self.resize(1280, 800)
 
         self.thread_pool = QThreadPool.globalInstance()
-        self._pending_workers = {}  # path -> worker, so we can tell stale results apart
+        self._pending_workers = {}  # path -> worker, used to identify stale results
         self._current_dir = None
         self._info_by_path: dict[str, FitsImageInfo] = {}
         self._pixmap_by_path: dict[str, QPixmap] = {}  # full-res thumb pixmap, rescaled for display
@@ -55,6 +68,7 @@ class MainWindow(QMainWindow):
 
         self._build_toolbar()
         self._build_layout()
+        self._start_update_check()
 
     # ---------------------------------------------------------------- UI setup
     def _build_toolbar(self):
@@ -196,10 +210,10 @@ class MainWindow(QMainWindow):
             self._load_folder(folder)
 
     def _navigate_tree_to(self, path: str):
-        """Select and reveal a folder in the tree without hiding its
-        parents/drives above it - setRootIndex() was used here previously,
-        which scoped the tree down to only that folder's subfolders and
-        made the tree look empty for any folder with no subdirectories."""
+        """Selects and reveals a folder without restricting the tree's
+        root, keeping parent directories/drives visible. Avoids
+        setRootIndex(), which scopes the view to only the given folder's
+        subdirectories and renders empty for folders with none."""
         idx = self.fs_model.index(path)
         self.tree.setCurrentIndex(idx)
         self.tree.scrollTo(idx)
@@ -295,7 +309,7 @@ class MainWindow(QMainWindow):
         fits_files = [
             os.path.join(folder, name)
             for name in entries
-            if os.path.splitext(name)[1].lower() in FITS_EXTENSIONS
+            if _is_fits_file(name)
         ]
 
         if not fits_files:
@@ -318,7 +332,7 @@ class MainWindow(QMainWindow):
         self.thread_pool.start(worker)
 
     def _on_thumbnail_ready(self, path: str, thumb, info: FitsImageInfo):
-        # Ignore results for a folder we've since navigated away from.
+        # Discards results for a folder that is no longer open.
         if self._current_dir is None or not path.startswith(self._current_dir):
             return
         self._info_by_path[path] = info
@@ -344,14 +358,11 @@ class MainWindow(QMainWindow):
 
     # ---------------------------------------------------------------- thumbnail size
     def _scaled_pixmap(self, pixmap: QPixmap) -> QPixmap:
-        """Rescale a decoded thumbnail to the current slider size.
+        """Rescales a decoded thumbnail to the current slider size.
 
-        Note: thumbnails are decoded once at THUMB_SIZE (220px). Sliding
-        above that just upscales this pixmap and will look soft - it's a
-        cheap in-memory resize, not a re-decode. Re-decoding at every
-        slider tick would mean hammering the thread pool on every drag
-        event, so this trades a bit of sharpness at the high end for a
-        slider that stays responsive.
+        Thumbnails are decoded once at THUMB_SIZE. Values above that
+        upscale the cached pixmap rather than re-decoding, trading
+        sharpness for responsiveness during slider interaction.
         """
         size = self.grid.iconSize()
         if pixmap.width() == size.width() and pixmap.height() == size.height():
@@ -401,9 +412,8 @@ class MainWindow(QMainWindow):
         self._enlarge_path = None
 
     def _on_enlarge_ready(self, path: str, thumb, info: FitsImageInfo):
-        # Dialog may have been closed, or a different item opened, before
-        # this background decode finished - discard stale results the same
-        # way the grid already does for regular thumbnails.
+        # Discards stale results if the dialog closed or a different file
+        # was selected before the decode completed.
         if self._enlarge_dialog is None or path != self._enlarge_path:
             return
         if thumb is None:
@@ -426,7 +436,7 @@ class MainWindow(QMainWindow):
         self.thread_pool.start(worker)
 
     def _on_export_ready(self, path: str, thumb, info: FitsImageInfo):
-        # User may have selected a different file while this was decoding.
+        # Discards results for a file no longer selected.
         if path != self._export_path:
             return
         self._export_path = None
@@ -450,7 +460,7 @@ class MainWindow(QMainWindow):
 
         try:
             Image.fromarray(thumb, mode="L").save(save_path)
-        except Exception as exc:  # noqa: BLE001 - surfaced to the user, not a crash
+        except Exception as exc:  # noqa: BLE001 - reported via dialog, not raised
             QMessageBox.warning(self, "Export failed", f"Could not save file: {exc}")
             self.statusBar().showMessage("Export failed")
             return
@@ -475,3 +485,25 @@ class MainWindow(QMainWindow):
         for row, (key, _label) in enumerate(HEADER_FIELDS):
             value = info.header.get(key, "-")
             self.header_table.setItem(row, 1, QTableWidgetItem(str(value)))
+
+    # ---------------------------------------------------------------- update check
+    def _start_update_check(self):
+        worker = UpdateCheckWorker(APP_VERSION)
+        worker.signals.finished.connect(self._on_update_check_finished)
+        self.thread_pool.start(worker)
+
+    def _on_update_check_finished(self, latest_tag: str, release_url: str):
+        if not latest_tag:
+            return  # up to date, or the check failed - either way, no notice
+
+        box = QMessageBox(self)
+        box.setWindowTitle("Update available")
+        box.setText(
+            f"A newer version of FITS Viewer is available: {latest_tag}\n"
+            f"(you have v{APP_VERSION})"
+        )
+        download_button = box.addButton("Download", QMessageBox.AcceptRole)
+        box.addButton("Later", QMessageBox.RejectRole)
+        box.exec()
+        if box.clickedButton() == download_button and release_url:
+            QDesktopServices.openUrl(QUrl(release_url))

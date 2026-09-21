@@ -9,7 +9,7 @@ and separate from the grid/tree/header wiring in main_window.py.
 
 from __future__ import annotations
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QPixmap, QWheelEvent, QTransform
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QLabel, QGraphicsView, QGraphicsScene,
@@ -26,7 +26,11 @@ class EnlargeDialog(QDialog):
     """Non-modal popup showing one image full-size, zoomable with the
     mouse wheel and pannable by dragging (QGraphicsView's built-in
     ScrollHandDrag). Space or Escape closes it, matching the key that
-    opened it."""
+    opened it. Delete/Backspace emits mark_toggle_requested instead of
+    closing - marking state is owned by MainWindow, this dialog only
+    reflects it via set_marked()."""
+
+    mark_toggle_requested = Signal()
 
     def __init__(self, title: str, parent=None):
         super().__init__(parent)
@@ -35,6 +39,14 @@ class EnlargeDialog(QDialog):
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
+
+        self.mark_banner = QLabel("MARKED FOR DELETION")
+        self.mark_banner.setAlignment(Qt.AlignCenter)
+        self.mark_banner.setStyleSheet(
+            "background-color: #782020; color: white; font-weight: 600; padding: 6px;"
+        )
+        self.mark_banner.hide()
+        layout.addWidget(self.mark_banner)
 
         self.status_label = QLabel("Loading full-size image...")
         self.status_label.setAlignment(Qt.AlignCenter)
@@ -50,6 +62,9 @@ class EnlargeDialog(QDialog):
         self._pixmap_item: QGraphicsPixmapItem | None = None
         self._base_transform = QTransform()
         self._zoom = 1.0
+
+    def set_marked(self, marked: bool) -> None:
+        self.mark_banner.setVisible(marked)
 
     def set_pixmap(self, pixmap: QPixmap) -> None:
         self.status_label.hide()
@@ -81,5 +96,7 @@ class EnlargeDialog(QDialog):
     def keyPressEvent(self, event) -> None:
         if event.key() in (Qt.Key_Escape, Qt.Key_Space):
             self.close()
+        elif event.key() in (Qt.Key_Delete, Qt.Key_Backspace):
+            self.mark_toggle_requested.emit()
         else:
             super().keyPressEvent(event)

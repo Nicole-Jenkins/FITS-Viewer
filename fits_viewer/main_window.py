@@ -3,7 +3,7 @@ from __future__ import annotations
 import os
 
 from PySide6.QtCore import Qt, QSize, QThreadPool, QDir, QEvent, QSettings, QUrl
-from PySide6.QtGui import QImage, QPixmap, QIcon, QAction, QDesktopServices
+from PySide6.QtGui import QImage, QPixmap, QIcon, QAction, QDesktopServices, QColor, QBrush
 from PySide6.QtWidgets import (
     QMainWindow, QWidget, QSplitter, QTreeView, QListWidget, QListWidgetItem,
     QFileSystemModel, QVBoxLayout, QHBoxLayout, QLabel, QTableWidget,
@@ -12,6 +12,7 @@ from PySide6.QtWidgets import (
 )
 import numpy as np
 from PIL import Image
+from send2trash import send2trash
 
 from .fits_utils import HEADER_FIELDS, FitsImageInfo
 from .thumbnail_worker import ThumbnailWorker
@@ -66,6 +67,8 @@ class MainWindow(QMainWindow):
         self.settings = QSettings("NicoleJenkins", "FITSViewer")
         self._favorites: list[str] = self.settings.value("favorites", [], type=list)
 
+        self._marked_for_deletion: set[str] = set()
+
         self._build_toolbar()
         self._build_layout()
         self._start_update_check()
@@ -110,6 +113,11 @@ class MainWindow(QMainWindow):
         self.export_action.triggered.connect(self._export_selected_image)
         self.export_action.setEnabled(False)  # enabled once a file is selected
         toolbar.addAction(self.export_action)
+
+        self.delete_marked_action = QAction("Delete Marked Files", self)
+        self.delete_marked_action.triggered.connect(self._delete_marked_files)
+        self.delete_marked_action.setEnabled(False)  # enabled once something is marked
+        toolbar.addAction(self.delete_marked_action)
 
         toolbar.addSeparator()
         toolbar.addWidget(QLabel("  Thumbnail size:  "))
@@ -173,6 +181,8 @@ class MainWindow(QMainWindow):
         self.grid.setMovement(QListWidget.Static)
         self.grid.currentItemChanged.connect(self._on_thumbnail_selected)
         self.grid.installEventFilter(self)
+        self.grid.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.grid.customContextMenuRequested.connect(self._show_grid_context_menu)
         splitter.addWidget(self.grid)
 
         # --- Header panel (right) ---
@@ -321,6 +331,7 @@ class MainWindow(QMainWindow):
             item.setData(Qt.UserRole, path)
             item.setSizeHint(QSize(THUMB_SIZE + 20, THUMB_SIZE + 40))
             self.grid.addItem(item)
+            self._apply_mark_visual(item, path in self._marked_for_deletion)
             self._start_thumbnail_job(path)
 
         self.statusBar().showMessage(f"{len(fits_files)} FITS file(s) in {folder}")
@@ -356,6 +367,102 @@ class MainWindow(QMainWindow):
                 return item
         return None
 
+    # ---------------------------------------------------------------- mark for deletion
+    MARK_BACKGROUND = QColor(120, 30, 30)  # dark red, visible against the dark theme
+
+    def _apply_mark_visual(self, item: QListWidgetItem, marked: bool):
+        if marked:
+            item.setBackground(QBrush(self.MARK_BACKGROUND))
+            item.setToolTip("Marked for deletion")
+        else:
+            item.setBackground(QBrush())  # reset to default
+            item.setToolTip("")
+
+    def _set_marked(self, path: str, marked: bool):
+        if marked:
+            self._marked_for_deletion.add(path)
+        else:
+            self._marked_for_deletion.discard(path)
+
+        item = self._find_item_for_path(path)
+        if item is not None:
+            self._apply_mark_visual(item, marked)
+
+        count = len(self._marked_for_deletion)
+        self.delete_marked_action.setEnabled(count > 0)
+        self.delete_marked_action.setText(
+            f"Delete Marked Files ({count})" if count else "Delete Marked Files"
+        )
+
+    def _toggle_mark_current_item(self):
+        item = self.grid.currentItem()
+        if item is None:
+            return
+        path = item.data(Qt.UserRole)
+        self._set_marked(path, path not in self._marked_for_deletion)
+
+    def _show_grid_context_menu(self, pos):
+        item = self.grid.itemAt(pos)
+        if item is None:
+            return
+        path = item.data(Qt.UserRole)
+        marked = path in self._marked_for_deletion
+
+        menu = QMenu(self)
+        action = menu.addAction("Unmark for Deletion" if marked else "Mark for Deletion")
+        action.triggered.connect(lambda: self._set_marked(path, not marked))
+        menu.exec(self.grid.viewport().mapToGlobal(pos))
+
+    def _delete_marked_files(self):
+        paths = list(self._marked_for_deletion)
+        if not paths:
+            return
+
+        reply = QMessageBox.question(
+            self,
+            "Delete marked files",
+            f"Send {len(paths)} marked file(s) to the Recycle Bin?\n\n"
+            + "\n".join(os.path.basename(p) for p in paths[:10])
+            + ("\n..." if len(paths) > 10 else ""),
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No,
+        )
+        if reply != QMessageBox.Yes:
+            return
+
+        failed = []
+        succeeded = []
+        for path in paths:
+            try:
+                send2trash(path)
+                succeeded.append(path)
+            except Exception as exc:  # noqa: BLE001 - reported via dialog, not raised
+                failed.append((path, str(exc)))
+
+        for path in succeeded:
+            self._marked_for_deletion.discard(path)
+            item = self._find_item_for_path(path)
+            if item is not None:
+                self.grid.takeItem(self.grid.row(item))
+            self._info_by_path.pop(path, None)
+            self._pixmap_by_path.pop(path, None)
+
+        self.delete_marked_action.setEnabled(bool(self._marked_for_deletion))
+        self.delete_marked_action.setText(
+            f"Delete Marked Files ({len(self._marked_for_deletion)})"
+            if self._marked_for_deletion else "Delete Marked Files"
+        )
+
+        if failed:
+            details = "\n".join(f"{os.path.basename(p)}: {err}" for p, err in failed)
+            QMessageBox.warning(
+                self, "Some files could not be deleted",
+                f"{len(succeeded)} file(s) sent to Recycle Bin.\n"
+                f"{len(failed)} failed:\n{details}",
+            )
+        else:
+            self.statusBar().showMessage(f"Sent {len(succeeded)} file(s) to Recycle Bin")
+
     # ---------------------------------------------------------------- thumbnail size
     def _scaled_pixmap(self, pixmap: QPixmap) -> QPixmap:
         """Rescales a decoded thumbnail to the current slider size.
@@ -379,15 +486,15 @@ class MainWindow(QMainWindow):
                 item.setIcon(QIcon(self._scaled_pixmap(pixmap)))
             item.setSizeHint(QSize(value + 20, value + 40))
 
-    # ---------------------------------------------------------------- enlarge view
+    # ---------------------------------------------------------------- enlarge view / marking
     def eventFilter(self, obj, event):
-        if (
-            obj is self.grid
-            and event.type() == QEvent.KeyPress
-            and event.key() == Qt.Key_Space
-        ):
-            self._open_enlarge_view()
-            return True
+        if obj is self.grid and event.type() == QEvent.KeyPress:
+            if event.key() == Qt.Key_Space:
+                self._open_enlarge_view()
+                return True
+            if event.key() in (Qt.Key_Delete, Qt.Key_Backspace):
+                self._toggle_mark_current_item()
+                return True
         return super().eventFilter(obj, event)
 
     def _open_enlarge_view(self):
@@ -399,6 +506,8 @@ class MainWindow(QMainWindow):
         dialog = EnlargeDialog(os.path.basename(path), parent=self)
         dialog.setModal(False)
         dialog.finished.connect(self._on_enlarge_dialog_closed)
+        dialog.mark_toggle_requested.connect(self._on_enlarge_mark_toggle_requested)
+        dialog.set_marked(path in self._marked_for_deletion)
         self._enlarge_dialog = dialog
         self._enlarge_path = path
         dialog.show()
@@ -410,6 +519,14 @@ class MainWindow(QMainWindow):
     def _on_enlarge_dialog_closed(self, _result):
         self._enlarge_dialog = None
         self._enlarge_path = None
+
+    def _on_enlarge_mark_toggle_requested(self):
+        if self._enlarge_path is None:
+            return
+        path = self._enlarge_path
+        self._set_marked(path, path not in self._marked_for_deletion)
+        if self._enlarge_dialog is not None:
+            self._enlarge_dialog.set_marked(path in self._marked_for_deletion)
 
     def _on_enlarge_ready(self, path: str, thumb, info: FitsImageInfo):
         # Discards stale results if the dialog closed or a different file

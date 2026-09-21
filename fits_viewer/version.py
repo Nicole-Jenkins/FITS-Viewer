@@ -9,4 +9,4 @@ bumped by hand before building each new release, or the update check
 will compare against a stale number.
 """
 
-APP_VERSION = "1.2.0"
+APP_VERSION = "1.3.0"

@@ -9,8 +9,8 @@ and separate from the grid/tree/header wiring in main_window.py.
 
 from __future__ import annotations
 
-from PySide6.QtCore import Qt, Signal
-from PySide6.QtGui import QPixmap, QWheelEvent, QTransform
+from PySide6.QtCore import Qt, Signal, QEvent
+from PySide6.QtGui import QPixmap, QWheelEvent, QTransform, QPainter
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QLabel, QGraphicsView, QGraphicsScene,
     QGraphicsPixmapItem,
@@ -28,9 +28,12 @@ class EnlargeDialog(QDialog):
     ScrollHandDrag). Space or Escape closes it, matching the key that
     opened it. Delete/Backspace emits mark_toggle_requested instead of
     closing - marking state is owned by MainWindow, this dialog only
-    reflects it via set_marked()."""
+    reflects it via set_marked(). Left/Right arrows emit
+    navigate_requested(-1/+1) so MainWindow can load the previous/next
+    image into this same window."""
 
     mark_toggle_requested = Signal()
+    navigate_requested = Signal(int)
 
     def __init__(self, title: str, parent=None):
         super().__init__(parent)
@@ -55,8 +58,16 @@ class EnlargeDialog(QDialog):
         self.scene = QGraphicsScene(self)
         self.view = QGraphicsView(self.scene)
         self.view.setDragMode(QGraphicsView.ScrollHandDrag)
+        self.view.setRenderHint(QPainter.SmoothPixmapTransform)
+        self.view.setRenderHint(QPainter.Antialiasing)
         self.view.setBackgroundBrush(Qt.black)
         self.view.hide()
+        # QGraphicsView normally uses the arrow keys to scroll, so they never
+        # reach this dialog's keyPressEvent - that's why left/right did
+        # nothing before. Intercept them on the view (and its viewport,
+        # which is what actually has focus after clicking the image).
+        self.view.installEventFilter(self)
+        self.view.viewport().installEventFilter(self)
         layout.addWidget(self.view)
 
         self._pixmap_item: QGraphicsPixmapItem | None = None
@@ -79,6 +90,20 @@ class EnlargeDialog(QDialog):
         self._base_transform = self.view.transform()
         self._zoom = 1.0
 
+    def show_loading(self, name: str) -> None:
+        """Called when switching to a new file. Keeps the previous image on
+        screen until the new one arrives; only the title changes."""
+        self.setWindowTitle(f"{name} - loading...")
+        if self._pixmap_item is None:
+            self.status_label.setText("Loading full-size image...")
+            self.status_label.show()
+
+    def eventFilter(self, obj, event) -> bool:
+        if event.type() == QEvent.KeyPress and event.key() in (Qt.Key_Left, Qt.Key_Right):
+            self.navigate_requested.emit(-1 if event.key() == Qt.Key_Left else 1)
+            return True
+        return super().eventFilter(obj, event)
+
     def set_error(self, message: str) -> None:
         self.view.hide()
         self.status_label.setText(message)
@@ -98,5 +123,7 @@ class EnlargeDialog(QDialog):
             self.close()
         elif event.key() in (Qt.Key_Delete, Qt.Key_Backspace):
             self.mark_toggle_requested.emit()
+        elif event.key() in (Qt.Key_Left, Qt.Key_Right):
+            self.navigate_requested.emit(-1 if event.key() == Qt.Key_Left else 1)
         else:
             super().keyPressEvent(event)
